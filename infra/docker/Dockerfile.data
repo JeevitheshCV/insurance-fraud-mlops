@@ -1,0 +1,20 @@
+# infra/docker/Dockerfile.data
+
+FROM python:3.9-slim
+
+# set a working directory
+WORKDIR /app
+
+# copy and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# copy your ingestion code and utils
+COPY src/ingest/ ./src/ingest/
+COPY src/utils.py ./src/utils.py
+
+# (optional) set any env var defaults here
+ENV GOOGLE_APPLICATION_CREDENTIALS=/etc/gcp/key.json
+
+# default entrypoint runs the ingestion script
+ENTRYPOINT ["python", "-u", "src/ingest/ingestion.py"]

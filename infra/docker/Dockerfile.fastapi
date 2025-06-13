@@ -1,0 +1,23 @@
+# infra/docker/Dockerfile.fastapi
+
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# install deps
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# copy API code and shared utils
+COPY src/api/ ./src/api/
+COPY src/utils.py ./src/utils.py
+
+# ensure your trained model is in a 'models/' dir
+COPY models/ ./models/
+
+# tell the container where to find it
+ENV MODEL_PATH=models/model.pkl
+
+# expose port and launch uvicorn
+EXPOSE 8000
+CMD ["uvicorn", "src.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
