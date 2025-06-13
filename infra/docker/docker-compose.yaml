@@ -1,51 +1,103 @@
-# infra/docker/docker-compose.yaml
-version: "3.8"
+# # infra/docker/docker-compose.yaml
+# version: "3.8"
+
+# services:
+#   # Postgres for metadata & predictions
+#   postgres:
+#     image: postgres:13
+#     env_file:
+#       - ../../sample.env
+#     environment:
+#       POSTGRES_USER: ${POSTGRES_USER}
+#       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+#       POSTGRES_DB: ${POSTGRES_DB}
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+#     ports:
+#       - "5432:5432"
+
+#   # Fake GCS server for local dev
+#   gcs-emulator:
+#     image: fsouza/fake-gcs-server:latest
+#     command: ["-scheme", "http", "-port", "4443", "-public-host", "localhost:4443"]
+#     ports:
+#       - "4443:4443"
+
+#   # Data ingestion container
+#   data_ingest:
+#     build:
+#       context: ../..               # adjust if your repo root is elsewhere
+#       dockerfile: infra/docker/Dockerfile.data
+#     env_file:
+#       - ../../sample.env
+#     depends_on:
+#       - postgres
+#       - gcs-emulator
+
+#   # FastAPI real-time prediction service
+#   api:
+#     build:
+#       context: ../..
+#       dockerfile: infra/docker/Dockerfile.fastapi
+#     env_file:
+#       - ../../sample.env
+#     ports:
+#       - "8000:8000"
+#     depends_on:
+#       - postgres
+#       - gcs-emulator
+
+# volumes:
+#   postgres_data:
+volumes: 
+  grafana_data: {}
+
+networks:
+  front-tier:
+  back-tier:
 
 services:
-  # Postgres for metadata & predictions
-  postgres:
-    image: postgres:13
+  db:
+    image: postgres
+    restart: always
     env_file:
-      - ../../sample.env
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - .env
     ports:
       - "5432:5432"
+    networks:
+      - back-tier
 
-  # Fake GCS server for local dev
-  gcs-emulator:
-    image: fsouza/fake-gcs-server:latest
-    command: ["-scheme", "http", "-port", "4443", "-public-host", "localhost:4443"]
+  pgadmin:
+    image: dpage/pgadmin4
+    restart: always
+    env_file:
+      - .env
     ports:
-      - "4443:4443"
+      - "8080:80"
+    networks:
+      - back-tier
+      - front-tier  
 
-  # Data ingestion container
-  data_ingest:
-    build:
-      context: ../..               # adjust if your repo root is elsewhere
-      dockerfile: infra/docker/Dockerfile.data
-    env_file:
-      - ../../sample.env
-    depends_on:
-      - postgres
-      - gcs-emulator
+  grafana:
+    image: grafana/grafana
+    user: "472"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/dashboards:/opt/grafana/dashboards
+    networks:
+      - back-tier
+      - front-tier
+    restart: always
 
-  # FastAPI real-time prediction service
-  api:
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.fastapi
+  fastapi_app:
     env_file:
-      - ../../sample.env
+      - ./fastapi_deploy/.env
+    build:
+      context: .
+      dockerfile: Dockerfile-fastapi
     ports:
       - "8000:8000"
-    depends_on:
-      - postgres
-      - gcs-emulator
-
-volumes:
-  postgres_data:
+    volumes:
+      - ./fastapi_deploy:/code/fastapi_deploy
+    command: uvicorn fastapi_deploy.server:app --host 0.0.0.0 --port 8000
