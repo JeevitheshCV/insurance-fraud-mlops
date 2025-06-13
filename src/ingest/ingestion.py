@@ -1,42 +1,48 @@
-# src/ingest/ingestion.py
-
 import os
+
+import kaggle
 import pandas as pd
-from google.cloud import storage
-from pathlib import Path
 
-from src.utils import get_gcs_client
+from prefect import task, flow
+from prefect_gcp import GcpCredentials, GcsBucket
 
-def load_local_data(filepath: str) -> pd.DataFrame:
-    """Load fraud dataset from local CSV file."""
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(f"CSV not found at: {filepath}")
-    df = pd.read_csv(filepath)
-    print(f"[INFO] Loaded {df.shape[0]} rows and {df.shape[1]} columns from {filepath}")
-    return df
 
-def upload_df_to_gcs(df: pd.DataFrame, bucket_name: str, destination_blob_name: str):
-    """Upload a DataFrame to GCS as a CSV file."""
-    client = get_gcs_client()
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(destination_blob_name)
+@task
+def kaggle_to_local() -> str:
+    """Downloads dataset from Kaggle and saves it to local"""
 
-    csv_data = df.to_csv(index=False)
-    blob.upload_from_string(csv_data, content_type="text/csv")
+    dataset = "shivamb/vehicle-claim-fraud-detection"
+    download_path = 'feature_n_model_exploration/raw_kaggle_data'
+    if not os.path.exists(download_path):
+        os.makedirs(download_path)
 
-    print(f"[INFO] Uploaded CSV to gs://{bucket_name}/{destination_blob_name}")
+    files_exist = any(os.scandir(download_path))
 
-def main():
-    # Read env variables
-    local_file_path = os.getenv("LOCAL_RAW_FILE", "data/fraud_oracle.csv")
-    gcs_bucket_name = os.getenv("GCS_BUCKET_NAME", "fraud-detection-data")
-    gcs_blob_path = os.getenv("GCS_BLOB_PATH", "raw/fraud_oracle.csv")
+    if not files_exist:
+        kaggle.api.dataset_download_files(dataset, path=download_path, unzip=True)
+        print("Dataset downloaded")
+    else:
+        print(f"Dataset already exists in {os.path.abspath(download_path)}")
 
-    # Step 1: Load local data
-    df = load_local_data(local_file_path)
+    return os.path.abspath(download_path)
 
-    # Step 2: Upload to GCS
-    upload_df_to_gcs(df, gcs_bucket_name, gcs_blob_path)
+@task
+def local_to_gcs(file_path: str) -> None:
+    """Uploads dataset from local to GCS"""
+    df = pd.read_csv(file_path + '/fraud_oracle.csv')
+    gcp_credentials = GcpCredentials.load("my-gcp-creds-block", validate=False)
+    gcs_bucket = GcsBucket(
+        bucket="fraud_modelling_prefect",
+        gcp_credentials=gcp_credentials
+    )
 
-if __name__ == "__main__":
-    main()
+    gcs_bucket.upload_from_dataframe(df=df, to_path='raw_car_insurance_kaggle')
+
+@flow(log_prints=True)
+def raw_kaggle_to_gcs():
+    """Orchestration flow to download dataset from Kaggle and save it to GCS"""
+    file_path = kaggle_to_local()
+    local_to_gcs(file_path)
+
+if __name__ == '__main__':
+    raw_kaggle_to_gcs()
